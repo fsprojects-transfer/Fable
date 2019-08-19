@@ -578,6 +578,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         | _ -> return failwith "makeFunctionArgs returns args with different length"
 
     // Getters and Setters
+
     | BasicPatterns.AnonRecordGet(callee, calleeType, fieldIndex) ->
         let! callee = transformExpr com ctx callee
         let fieldName = calleeType.AnonRecordTypeDetails.SortedFieldNames.[fieldIndex]
@@ -746,6 +747,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
         let typ = makeType com ctx.GenericArgs fsExpr.Type
         return Fable.DecisionTreeSuccess(targetIndex, boundValues, typ)
 
+    // read a static field (Example: Decimal.Zero)
     | BasicPatterns.ILFieldGet(None, ownerTyp, fieldName) ->
         let ownerTyp = makeType com ctx.GenericArgs ownerTyp
         let typ = makeType com ctx.GenericArgs fsExpr.Type
@@ -755,6 +757,23 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
             return sprintf "Cannot compile ILFieldGet(%A, %s)" ownerTyp fieldName
             |> addErrorAndReturnNull com ctx.InlinePath (makeRangeFrom fsExpr)
 
+    // read a member field (Example: Vector3.X)
+    | BasicPatterns.ILFieldGet(Some callee, calleeType, fieldName)
+       when (Replacements.isILMemberFieldSupported (makeType com ctx.GenericArgs calleeType) fieldName) ->
+        let! callee = transformExpr com ctx callee
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
+        let kind = Fable.FieldGet(fieldName, true, typ)
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
+        return Fable.Get(callee, kind, typ, makeRangeFrom fsExpr)
+
+    // write a member field (example: Vector3.X)
+    | BasicPatterns.ILFieldSet(Some callee, calleeType, fieldName, value)
+       when (Replacements.isILMemberFieldSupported (makeType com ctx.GenericArgs calleeType) fieldName) ->
+        let! callee = transformExpr com ctx callee
+        let! value = transformExpr com ctx value
+        let typ = makeType com ctx.GenericArgs fsExpr.Type
+        return Fable.Set(callee, Fable.FieldSet(fieldName, typ), value, makeRangeFrom fsExpr)
+
     | BasicPatterns.Quote _ ->
         return "Quotes are not currently supported by Fable"
         |> addErrorAndReturnNull com ctx.InlinePath (makeRangeFrom fsExpr)
@@ -763,8 +782,7 @@ let private transformExpr (com: IFableCompiler) (ctx: Context) fsExpr =
     | BasicPatterns.AddressOf(expr) ->
         let! expr = transformExpr com ctx expr
         return expr
-
-    // | BasicPatterns.ILFieldSet _
+        
     // | BasicPatterns.AddressSet _
     // | BasicPatterns.ILAsm _
     | expr ->

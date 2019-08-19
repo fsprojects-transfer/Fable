@@ -129,6 +129,8 @@ type BuiltinType =
     | BclUInt64
     | BclDecimal
     | BclBigInt
+    | BclQuaternion
+    | BclVector3
     | BclHashSet of Type
     | BclDictionary of key:Type * value:Type
     | FSharpSet of Type
@@ -151,6 +153,8 @@ let (|BuiltinEntity|_|) (ent: FSharpEntity, genArgs) =
     | Some Types.decimal, _
     | Some "Microsoft.FSharp.Core.decimal`1", _ -> Some BclDecimal
     | Some Types.bigint, _ -> Some BclBigInt
+    | Some Types.quaternion, _ -> Some BclQuaternion
+    | Some Types.vector3, _ -> Some BclVector3
     | Some Types.fsharpSet, [t] -> Some(FSharpSet(t))
     | Some Types.fsharpMap, [k;v] -> Some(FSharpMap(k,v))
     | Some Types.hashset, [t] -> Some(BclHashSet(t))
@@ -254,6 +258,8 @@ let coreModFor = function
     | BclDecimal -> "Decimal"
     | BclBigInt -> "BigInt"
     | BclTimeSpan -> "TimeSpan"
+    | BclQuaternion _ -> "Quaternion"
+    | BclVector3 _ -> "Vector3"
     | FSharpSet _ -> "Set"
     | FSharpMap _ -> "Map"
     | FSharpResult _ -> "Option"
@@ -2735,6 +2741,7 @@ let partialApplyAtRuntime t arity (fn: Expr) (args: Expr list) =
     let args = NewArray(ArrayValues args, Any) |> makeValue None
     Helper.CoreCall("Util", "partialApply", t, [makeIntConst arity; fn; args])
 
+/// try to map a static field (e.g. Decimal.Zero)
 let tryField returnTyp ownerTyp fieldName =
     match ownerTyp, fieldName with
     | Builtin BclDecimal, _ ->
@@ -2752,6 +2759,14 @@ let tryField returnTyp ownerTyp fieldName =
             Helper.CoreCall("BitConverter", Naming.lowerFirst fieldName, returnTyp, []) |> Some
         | _ -> None
     | _ -> None
+
+// this is queried when an IL member field is read / written.
+// at the moment member fields are only supported for Vector3 / Quaternion, all other supported BCL types expose properties instead of fields.
+let isILMemberFieldSupported ownerTyp _fieldName =
+    match ownerTyp with
+    | Builtin BclQuaternion
+    | Builtin BclVector3 -> true
+    | _ -> false
 
 let private replacedModules =
   dict [
@@ -2861,6 +2876,8 @@ let private replacedModules =
     "Microsoft.FSharp.Control.ObservableModule", observable
     Types.type_, types
     "System.Reflection.TypeInfo", types
+    "System.Numerics.Vector3", bclType
+    "System.Numerics.Quaternion", bclType
 ]
 
 let tryCall (com: ICompiler) (ctx: Context) r t (info: CallInfo) (thisArg: Expr option) (args: Expr list) =
