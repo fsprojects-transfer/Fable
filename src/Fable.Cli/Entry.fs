@@ -170,6 +170,7 @@ type Runner =
 
         let compilerOptions =
             CompilerOptionsHelper.Make(language=language,
+                                       eraseTypes = flagEnabled "--eraseTypes" args,
                                        typedArrays = typedArrays,
                                        fileExtension = fileExt,
                                        define = define,
